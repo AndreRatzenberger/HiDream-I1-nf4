@@ -2,6 +2,7 @@ import torch
 import gradio as gr
 import logging
 import os
+import argparse
 
 from .nf4 import *
 
@@ -69,12 +70,45 @@ def gen_img_helper(model, custom_path, prompt, res, seed):
 if __name__ == "__main__":
     logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
     
-    # Initialize with default model
-    print("Loading default model (fast)...")
-    current_model = "fast"
+    # Setup command-line argument parser
+    parser = argparse.ArgumentParser(description="HiDream-I1-nf4 Web Interface")
+    parser.add_argument("-m", "--model", type=str, default="fast",
+                       help="Model to use at startup",
+                       choices=["dev", "full", "fast"])
+    parser.add_argument("-p", "--path", type=str, default="",
+                       help="Path to a custom model directory to use at startup")
+    
+    # Add gradio server args
+    parser.add_argument("--share", action="store_true", help="Create a public URL")
+    parser.add_argument("--port", type=int, help="Port to run the server on")
+    parser.add_argument("--server-name", type=str, default="0.0.0.0", help="Server address")
+    
+    args = parser.parse_args()
+    
+    # Initialize with specified model
     current_custom_path = ""
-    pipe, _ = load_models(current_model)
+    
+    if args.path:
+        # User provided a custom model path
+        if not os.path.exists(args.path):
+            print(f"Error: Custom model path '{args.path}' does not exist")
+            exit(1)
+        
+        print(f"Loading custom model from {args.path}...")
+        current_model = "custom"
+        current_custom_path = args.path
+        pipe, _ = load_custom_model(args.path)
+    else:
+        # User specified a predefined model or using default
+        print(f"Loading model {args.model}...")
+        current_model = args.model
+        pipe, _ = load_models(args.model)
+    
     print("Model loaded successfully!")
+
+    # Determine initial UI values based on startup configuration
+    initial_model = args.model if not args.path else "fast"  # Default to fast if custom path is used
+    initial_path = args.path
 
     # Create Gradio interface
     with gr.Blocks(title="HiDream-I1-nf4 Dashboard") as demo:
@@ -86,7 +120,7 @@ if __name__ == "__main__":
                     gr.Markdown("## Model Selection")
                     model_type = gr.Radio(
                         choices=list(k for k in MODEL_CONFIGS.keys() if k != "custom"),
-                        value="fast",
+                        value=initial_model,
                         label="Predefined Model",
                         info="Select a predefined model variant"
                     )
@@ -94,7 +128,8 @@ if __name__ == "__main__":
                     custom_model_path = gr.Textbox(
                         label="Custom Model Path (Optional)", 
                         placeholder="/path/to/your/model",
-                        info="If provided, this will override the predefined model selection"
+                        info="If provided, this will override the predefined model selection",
+                        value=initial_path
                     )
                 
                 prompt = gr.Textbox(
@@ -128,4 +163,9 @@ if __name__ == "__main__":
             outputs=[output_image, seed_used]
         )
 
-    demo.launch()
+    # Launch with the specified server options
+    demo.launch(
+        server_name=args.server_name,
+        server_port=args.port,
+        share=args.share
+    )
