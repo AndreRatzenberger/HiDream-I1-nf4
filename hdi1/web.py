@@ -1,6 +1,7 @@
 import torch
 import gradio as gr
 import logging
+import os
 
 from .nf4 import *
 
@@ -20,23 +21,49 @@ def parse_resolution(resolution_str):
     return tuple(map(int, resolution_str.split("(")[0].strip().split(" × ")))
 
 
-def gen_img_helper(model, prompt, res, seed):
-    global pipe, current_model
-
+def gen_img_helper(model, custom_path, prompt, res, seed):
+    global pipe, current_model, current_custom_path
+    
+    # Determine if we're using a predefined or custom model
+    use_custom = custom_path.strip() != ""
+    
+    # Get the model path and identifier
+    model_identifier = "custom" if use_custom else model
+    model_path = custom_path if use_custom else model
+    
+    # Check if model needs to be reloaded
+    need_reload = model_identifier != current_model or (use_custom and custom_path != current_custom_path)
+    
     # 1. Check if the model matches loaded model, load the model if not
-    if model != current_model:
+    if need_reload:
         print(f"Unloading model {current_model}...")
         del pipe
         torch.cuda.empty_cache()
         
-        print(f"Loading model {model}...")
-        pipe, _ = load_models(model)
-        current_model = model
+        if use_custom:
+            # Validate custom path
+            if not os.path.exists(custom_path):
+                return None, f"Error: Custom model path '{custom_path}' does not exist"
+            
+            print(f"Loading custom model from {custom_path}...")
+            pipe, _ = load_custom_model(custom_path)
+            current_model = "custom"
+            current_custom_path = custom_path
+        else:
+            print(f"Loading model {model}...")
+            pipe, _ = load_models(model)
+            current_model = model
+            current_custom_path = ""
+            
         print("Model loaded successfully!")
 
     # 2. Generate image
     res = parse_resolution(res)
-    return generate_image(pipe, model, prompt, res, seed)
+    try:
+        image, used_seed = generate_image(pipe, model_identifier, prompt, res, seed)
+        return image, used_seed
+    except Exception as e:
+        return None, f"Error generating image: {str(e)}"
 
 
 if __name__ == "__main__":
@@ -45,6 +72,7 @@ if __name__ == "__main__":
     # Initialize with default model
     print("Loading default model (fast)...")
     current_model = "fast"
+    current_custom_path = ""
     pipe, _ = load_models(current_model)
     print("Model loaded successfully!")
 
@@ -54,12 +82,20 @@ if __name__ == "__main__":
         
         with gr.Row():
             with gr.Column():
-                model_type = gr.Radio(
-                    choices=list(MODEL_CONFIGS.keys()),
-                    value="fast",
-                    label="Model Type",
-                    info="Select model variant"
-                )
+                with gr.Group():
+                    gr.Markdown("## Model Selection")
+                    model_type = gr.Radio(
+                        choices=list(k for k in MODEL_CONFIGS.keys() if k != "custom"),
+                        value="fast",
+                        label="Predefined Model",
+                        info="Select a predefined model variant"
+                    )
+                    
+                    custom_model_path = gr.Textbox(
+                        label="Custom Model Path (Optional)", 
+                        placeholder="/path/to/your/model",
+                        info="If provided, this will override the predefined model selection"
+                    )
                 
                 prompt = gr.Textbox(
                     label="Prompt", 
@@ -88,7 +124,7 @@ if __name__ == "__main__":
         
         generate_btn.click(
             fn=gen_img_helper,
-            inputs=[model_type, prompt, resolution, seed],
+            inputs=[model_type, custom_model_path, prompt, resolution, seed],
             outputs=[output_image, seed_used]
         )
 
