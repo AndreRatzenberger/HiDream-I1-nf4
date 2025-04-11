@@ -3,6 +3,7 @@ from .nf4 import *
 import argparse
 import time
 import logging
+import os
 
 
 if __name__ == "__main__":
@@ -16,6 +17,9 @@ if __name__ == "__main__":
                         help="Model to use",
                         choices=["dev", "full", "fast"])
     
+    parser.add_argument("-p", "--path", type=str, default=None,
+                        help="Path to a custom model directory")
+    
     parser.add_argument("-s", "--seed", type=int, default=-1, 
                         help="Seed for generation")
     
@@ -26,11 +30,20 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output", type=str, default="output.png")
     
     args = parser.parse_args()
-    model_type = args.model
     
-    # Initialize with default model
-    print(f"Loading model {model_type}...")
-    pipe, _ = load_models(model_type)
+    # Initialize model
+    if args.path:
+        if not os.path.exists(args.path):
+            print(f"Error: Custom model path '{args.path}' does not exist")
+            exit(1)
+        print(f"Loading custom model from {args.path}...")
+        pipe, config = load_custom_model(args.path)
+        model_type = "custom"
+    else:
+        model_type = args.model
+        print(f"Loading predefined model {model_type}...")
+        pipe, config = load_models(model_type)
+    
     print("Model loaded successfully!")
     
     st = time.time()

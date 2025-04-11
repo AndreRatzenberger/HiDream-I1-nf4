@@ -33,6 +33,12 @@ MODEL_CONFIGS = {
         "num_inference_steps": 16,
         "shift": 3.0,
         "scheduler": FlashFlowMatchEulerDiscreteScheduler
+    },
+    "custom": {
+        "guidance_scale": 0.0,
+        "num_inference_steps": 28,
+        "shift": 6.0,
+        "scheduler": FlashFlowMatchEulerDiscreteScheduler
     }
 }
 
@@ -66,6 +72,43 @@ def load_models(model_type: str):
     
     pipe = HiDreamImagePipeline.from_pretrained(
         config["path"],
+        scheduler=FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False),
+        tokenizer_4=tokenizer_4,
+        text_encoder_4=text_encoder_4,
+        torch_dtype=torch.bfloat16,
+    )
+    pipe.transformer = transformer
+    log_vram("✅ Pipeline loaded!")
+    pipe.enable_sequential_cpu_offload()
+    
+    return pipe, config
+
+
+def load_custom_model(model_path: str):
+    config = MODEL_CONFIGS["custom"]
+    
+    tokenizer_4 = PreTrainedTokenizerFast.from_pretrained(LLAMA_MODEL_NAME)
+    log_vram("✅ Tokenizer loaded!")
+    
+    text_encoder_4 = LlamaForCausalLM.from_pretrained(
+        LLAMA_MODEL_NAME,
+        output_hidden_states=True,
+        output_attentions=True,
+        return_dict_in_generate=True,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
+    log_vram("✅ Text encoder loaded!")
+
+    transformer = HiDreamImageTransformer2DModel.from_pretrained(
+        model_path,
+        subfolder="transformer",
+        torch_dtype=torch.bfloat16
+    )
+    log_vram("✅ Transformer loaded!")
+    
+    pipe = HiDreamImagePipeline.from_pretrained(
+        model_path,
         scheduler=FlowUniPCMultistepScheduler(num_train_timesteps=1000, shift=config["shift"], use_dynamic_shifting=False),
         tokenizer_4=tokenizer_4,
         text_encoder_4=text_encoder_4,
